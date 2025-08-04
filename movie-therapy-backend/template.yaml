@@ -9,10 +9,10 @@ Description: >
 Globals:
   Function:
     Timeout: 3
-
     Tracing: Active
   Api:
     TracingEnabled: true
+
 Resources:
   HelloWorldFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
@@ -20,14 +20,30 @@ Resources:
       CodeUri: hello_world/
       Handler: app.lambda_handler
       Runtime: python3.13
-      Architectures:
-      - x86_64
+      Timeout: 20
+      MemorySize: 512
+      Policies:
+        - Effect: Allow
+          Action: 
+            - secretesmanager:GetSecretValue
+          Resource: "*" # optionally restrict model ARN
       Events:
         HelloWorld:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
             Path: /hello
             Method: get
+        ChatApiGet:
+          Type: Api
+          Properties:
+            Path: /chat
+            Method: post
+        ChatApiPost:
+          Type: Api
+          Properties:
+            Path: /chat
+            Method: get
+
 
 Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
@@ -40,6 +56,9 @@ Outputs:
   HelloWorldFunction:
     Description: Hello World Lambda Function ARN
     Value: !GetAtt HelloWorldFunction.Arn
+    Environment:
+      Variables:
+        OPENAI_API_KEY: your-api-key-here
   HelloWorldFunctionIamRole:
     Description: Implicit IAM Role created for Hello World function
     Value: !GetAtt HelloWorldFunctionRole.Arn

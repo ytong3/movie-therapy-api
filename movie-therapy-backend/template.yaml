@@ -3,9 +3,6 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   movie-therapy-backend
 
-  Sample SAM Template for movie-therapy-backend
-
-# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
     Timeout: 3
@@ -15,7 +12,7 @@ Globals:
 
 Resources:
   HelloWorldFunction:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Type: AWS::Serverless::Function
     Properties:
       CodeUri: hello_world/
       Handler: app.lambda_handler
@@ -23,13 +20,10 @@ Resources:
       Timeout: 20
       MemorySize: 512
       Policies:
-        - Effect: Allow
-          Action: 
-            - secretesmanager:GetSecretValue
-          Resource: "*" # optionally restrict model ARN
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
       Events:
         HelloWorld:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Type: Api
           Properties:
             Path: /hello
             Method: get
@@ -37,28 +31,25 @@ Resources:
           Type: Api
           Properties:
             Path: /chat
-            Method: post
+            Method: get
         ChatApiPost:
           Type: Api
           Properties:
             Path: /chat
-            Method: get
-
+            Method: post
+        ChatApiOptions:
+          Type: Api
+          Properties:
+            Path: /chat
+            Method: options
 
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
   HelloWorldApi:
-    Description: API Gateway endpoint URL for Prod stage for Hello World 
-      function
+    Description: API Gateway endpoint URL for the Prod stage of HelloWorldFunction
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/hello/"
   HelloWorldFunction:
-    Description: Hello World Lambda Function ARN
+    Description: ARN of the HelloWorldFunction
     Value: !GetAtt HelloWorldFunction.Arn
-    Environment:
-      Variables:
-        OPENAI_API_KEY: your-api-key-here
   HelloWorldFunctionIamRole:
-    Description: Implicit IAM Role created for Hello World function
+    Description: IAM Role ARN created for HelloWorldFunction
     Value: !GetAtt HelloWorldFunctionRole.Arn

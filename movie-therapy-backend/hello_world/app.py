@@ -1,22 +1,14 @@
 import json
 import boto3
 import logging
-import instructor
-from pydantic import BaseModel
-from openai import OpenAI
+import traceback
 from typing import List
+from services.OMDBClient import get_omdb_client
+import asyncio
+from services.chatgpt import get_movie_recommendations
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-class Movie(BaseModel):
-    title: str
-    year: int
-    imdb_id: str
-    commentary: str
-
-class MovieList(BaseModel):
-    movies: List[Movie]
 
 def make_response(status_code, body):
     return {
@@ -29,71 +21,86 @@ def make_response(status_code, body):
         }
     }
 
-def get_openai_key(secret_name="openai/api-key"):
-    client = boto3.client("secretsmanager")
-    response = client.get_secret_value(SecretId=secret_name)
-    secret_dict = json.loads(response["SecretString"])
-    return secret_dict["OPENAI_API_KEY"]
+def get_secret():
+    secret_name = "prod/MovieTherapy/apiKeys"
+    region_name = "us-east-1"
 
-openai_api_key = get_openai_key()
+    session = boto3.session.Session()
+    client = session.client(service_name="secretsmanager", region_name=region_name)
 
-def get_movie_recommendations(prompt):
+    try:
+        get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+    except Exception as e:
+        logger.error("Error retrieving secret: %s", str(e))
+        raise e
     
-    logger.info("Prompt received: %s", prompt)
+    return json.loads(get_secret_value_response["SecretString"])
 
-    client = instructor.from_provider("openai/gpt-4o", api_key=openai_api_key)
+app_secrets = get_secret()
+openai_api_key = app_secrets.get("OPENAI_API_KEY")
+omdb_api_key = app_secrets.get("OMDB_API_KEY")
 
-    movies = client.chat.completions.create(
-        response_model=MovieList,
-        messages=[
-            {
-                "role": "system", 
-                "content": "You are a helpful film Sommelier. \
-                            You recommend movies based on user's moods and sometimes a commentary of what's going on for them. \
-                            You are also a therapist. So you recommend 5 movies that make them feel they are seen and felt. \
-                            When you recommend movies, you also provide a brief commentary on why you chose each movie. \
-                            Format your response as a JSON object with a 'movies' key containing an array of movie objects. \
-                            Each movie object should have 'title', 'year', 'imdb_id' and 'commentary' keys."
-            },
-            {
-                "role": "user", 
-                "content": prompt
-            }
-        ],
-        max_tokens=300,
-        temperature=0.7
-    )
+async def enrich_movie_data(movie_list: List[dict]) -> List[dict]:
+    # logger.info("Enriching movie data for %d movies", len(movie_list))
+    omdb_client = get_omdb_client(omdb_api_key)
 
-    return movies.model_dump()
+    async def enrich_one(movie):
+        logger.info("Fetching data for movie: %r", movie)
+        data = await omdb_client.fetch_movie_async(movie["imdb_id"])
+        data["commentary"] = movie["commentary"]
+        return data
+
+    tasks = [enrich_one(movie) for movie in movie_list]
+
+    enriched_movie_list = await asyncio.gather(*tasks)
+    return enriched_movie_list
+
+def handle_chat_post(event):
+    body = json.loads(event.get("body") or "{}")
+    prompt = body.get("prompt")
 
 
+    recommended = get_movie_recommendations(prompt)
+
+    logger.info("Recommended movies: %s", recommended)
+
+    loop = asyncio.get_event_loop()
+    enriched = loop.run_until_complete(enrich_movie_data(recommended["movies"]))
+
+    return {
+        "movies": enriched,
+        "introduction": recommended["introduction"]
+    }
+
+def handle_hello(method):
+    if method == "GET":
+        logger.info("Received GET request on /hello")
+        return make_response(200, {"message": "Hello, World!"})
+    else:
+        return make_response(405, {"error": "Method Not Allowed"})
+
+def handle_chat(method, event):
+    if method == "POST":
+        output = handle_chat_post(event)
+        logger.info("Response generated successfully")
+        return make_response(200, {"response": output})
+    else:
+        return make_response(405, {"error": "Method Not Allowed"})
 
 def lambda_handler(event, context):
-    # logger.info("Received event: %s", json.dumps(event))
-    path = event.get("path", "/")
-    method = event.get("httpMethod", "GET").upper()
-    if path == "/hello":
-        return {
-            "statusCode": 200,
-            "body": json.dumps({"message": "Hello, World!"})
-        }
-    elif path == "/chat":
+    path = (event.get("path") or "/").rstrip("/") or "/"
+    method = (event.get("httpMethod") or "GET").upper()
+
+    try:
         if method == "OPTIONS":
             return make_response(204, "No Content")
-        if method == "POST":
-            try:
-
-                body = json.loads(event.get("body") or "{}")
-
-                prompt = body.get("prompt", "default fallback prompt")
-
-                output = get_movie_recommendations(prompt)
-                
-                logger.info("Response generated successfully")
-                
-                return make_response(200, {"response": output})
-            
-            except Exception as e:
-                return make_response(500, {"error": str(e)})
+        if path == "/hello":
+            return handle_hello(method)
+        elif path == "/chat":
+            return handle_chat(method, event)
         else:
-            return make_response(405, {"error": "Method Not Allowed"})
+            return make_response(404, {"error": "Not Found"})
+    except Exception as e:
+        logger.error("Error processing request: %s", str(e))
+        logger.error("Stack trace:\n%s", traceback.format_exc())
+        return make_response(500, {"error": str(e)})

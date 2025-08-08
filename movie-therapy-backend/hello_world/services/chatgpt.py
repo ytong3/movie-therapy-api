@@ -37,6 +37,7 @@ def get_movie_recommendations(prompt) -> dict:
                     "Format your response as a JSON object with a 'introduction' key containing the introduction, "
                     "and 'movies' key containing an array of movie objects. "
                     "Each movie object should have 'imdb_id' and 'commentary' keys."
+                    "Make sure the imdb_id is correct and the commentary is insightful."
                 )
             },
             {
@@ -45,6 +46,6 @@ def get_movie_recommendations(prompt) -> dict:
             }
         ],
         max_tokens=500,
-        temperature=1.0,
+        temperature=0.8,
     )
     return movie_list.model_dump()
